@@ -56,6 +56,7 @@ class YouTubeShortsUploader:
             except Exception:
                 continue
         print("Could not click Create button.")
+        _debug_dump(self.page, "create_fail")
         return False
 
     def _select_upload_option(self):
@@ -106,12 +107,11 @@ class YouTubeShortsUploader:
         return False
 
     def _fill_title(self, title):
-        """Fill the video title field (contenteditable div, not textarea)."""
+        """Fill the video title field (contenteditable div)."""
         title_selectors = [
             "ytcp-video-metadata-editor #title-textarea #textbox",
             "#title-textarea #textbox",
-            "ytcp-video-metadata-editor div[contenteditable='true']",
-            "[aria-label*='title' i][contenteditable='true']",
+            "[aria-label*='Add a title']",
         ]
         for sel in title_selectors:
             try:
@@ -131,7 +131,7 @@ class YouTubeShortsUploader:
         desc_selectors = [
             "ytcp-video-metadata-editor #description-textarea #textbox",
             "#description-textarea #textbox",
-            "[aria-label*='description' i][contenteditable='true']",
+            "[aria-label*='Tell viewers about your video']",
         ]
         for sel in desc_selectors:
             try:
@@ -184,20 +184,20 @@ class YouTubeShortsUploader:
         for step in range(4):
             try:
                 if self.page.locator(
-                    "ytcp-button:has-text('Publish'), button:has-text('Publish')"
+                    "ytcp-button#done-button"
                 ).is_visible():
-                    print("Reached Publish step.")
+                    print("Reached final step.")
                     break
 
                 next_btn = self.page.locator(
-                    "ytcp-button:has-text('Next'), button:has-text('Next')"
+                    "ytcp-button#next-button"
                 ).first
                 next_btn.wait_for(state="visible", timeout=8000)
                 next_btn.click()
                 print(f"Clicked Next (step {step + 1})")
                 time.sleep(1)
                 self.page.wait_for_function(
-                    "() => !document.querySelector('ytcp-button[disabled]:has-text(\"Next\")')",
+                    "() => !document.querySelector('ytcp-button#next-button[disabled]')",
                     timeout=10000
                 )
             except Exception:
@@ -211,7 +211,7 @@ class YouTubeShortsUploader:
         if schedule_dt:
             try:
                 sched_radio = self.page.locator(
-                    "tp-yt-paper-radio-button, ytcp-radio-button"
+                    "tp-yt-paper-radio-button"
                 ).filter(has_text="Schedule").first
                 sched_radio.wait_for(state="visible", timeout=8000)
                 sched_radio.click()
@@ -235,19 +235,12 @@ class YouTubeShortsUploader:
                 time.sleep(1)
 
                 sched_btn = self.page.locator(
-                    "ytcp-button:has-text('Schedule'), button:has-text('Schedule')"
+                    "ytcp-button#done-button"
                 ).first
                 sched_btn.wait_for(state="visible", timeout=15000)
 
                 self.page.wait_for_function(
-                    """() => {
-                        const byTag = [...document.querySelectorAll('ytcp-button')].find(
-                            b => b.innerText && b.innerText.trim().startsWith('Schedule')
-                        );
-                        if (byTag) return byTag.getAttribute('disabled') === null;
-                        const btn = document.querySelector('button[aria-label*=\"Schedule\"]');
-                        return btn ? !btn.disabled : false;
-                    }""",
+                    "() => !document.querySelector('ytcp-button#done-button[disabled]')",
                     timeout=300000
                 )
 
@@ -260,8 +253,6 @@ class YouTubeShortsUploader:
 
         try:
             public_radio = self.page.locator(
-                "tp-yt-paper-radio-button[name='PUBLIC'], "
-                "ytcp-radio-button[value='PUBLIC'], "
                 "tp-yt-paper-radio-button"
             ).filter(has_text="Public").first
             public_radio.wait_for(state="visible", timeout=8000)
@@ -273,20 +264,13 @@ class YouTubeShortsUploader:
 
         try:
             pub_btn = self.page.locator(
-                "ytcp-button:has-text('Publish'), button:has-text('Publish')"
+                "ytcp-button#done-button"
             ).first
             pub_btn.wait_for(state="visible", timeout=20000)
 
             print("Waiting for upload to finish (Publish button to become enabled)...")
             self.page.wait_for_function(
-                """() => {
-                    const byTag = [...document.querySelectorAll('ytcp-button')].find(
-                        b => b.innerText && b.innerText.trim().startsWith('Publish')
-                    );
-                    if (byTag) return byTag.getAttribute('disabled') === null;
-                    const btn = document.querySelector('button[aria-label*=\"Publish\"]');
-                    return btn ? !btn.disabled : false;
-                }""",
+                "() => !document.querySelector('ytcp-button#done-button[disabled]')",
                 timeout=300000
             )
 
@@ -384,7 +368,7 @@ class YouTubeShortsUploader:
         print("Waiting for video processing...")
         try:
             self.page.wait_for_selector(
-                "ytcp-button:has-text('Publish'), button:has-text('Publish')",
+                "ytcp-button#done-button",
                 timeout=60000
             )
             print("Publish button available")
