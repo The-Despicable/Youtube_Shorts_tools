@@ -1,0 +1,7 @@
+__pycache__/
+browser_profile/
+cookies.json
+videos/*.mp4
+batch videos/*.mp4
+.openclaude/
+*.pyc
