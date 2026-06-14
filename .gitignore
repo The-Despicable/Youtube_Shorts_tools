@@ -5,3 +5,4 @@ videos/*.mp4
 batch videos/*.mp4
 .openclaude/
 *.pyc
+upload_log.db

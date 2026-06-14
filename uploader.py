@@ -3,8 +3,11 @@
 import os
 import time
 import re
+import json
+from datetime import datetime
 from config import YOUTUBE_STUDIO_URL, VIDEO_EXTENSIONS
 from auth import get_context, is_logged_in
+from db import init_db, already_uploaded, log_upload
 
 
 class YouTubeShortsUploader:
@@ -174,8 +177,8 @@ class YouTubeShortsUploader:
         self._fill_description(description)
         self._fill_tags(tags)
 
-    def _go_through_wizard(self):
-        """Navigate the upload wizard steps, then set Public and Publish."""
+    def _go_through_wizard(self, schedule_dt=None):
+        """Navigate the upload wizard steps, set visibility/schedule, then Publish."""
         print("Navigating upload wizard...")
 
         for step in range(4):
@@ -202,9 +205,60 @@ class YouTubeShortsUploader:
                 break
 
         time.sleep(1)
+        self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        time.sleep(0.5)
+
+        if schedule_dt:
+            try:
+                sched_radio = self.page.locator(
+                    "tp-yt-paper-radio-button, ytcp-radio-button"
+                ).filter(has_text="Schedule").first
+                sched_radio.wait_for(state="visible", timeout=8000)
+                sched_radio.click()
+                print("Selected Schedule")
+                time.sleep(1)
+
+                date_str = schedule_dt.strftime("%m/%d/%Y")
+                time_str = schedule_dt.strftime("%I:%M %p")
+
+                date_input = self.page.locator(
+                    "input[placeholder*='date' i], input[aria-label*='date' i]"
+                ).first
+                date_input.fill(date_str)
+                date_input.press("Tab")
+
+                time_input = self.page.locator(
+                    "input[placeholder*='time' i], input[aria-label*='time' i]"
+                ).first
+                time_input.fill(time_str)
+                time_input.press("Tab")
+                time.sleep(1)
+
+                sched_btn = self.page.locator(
+                    "ytcp-button:has-text('Schedule'), button:has-text('Schedule')"
+                ).first
+                sched_btn.wait_for(state="visible", timeout=15000)
+
+                self.page.wait_for_function(
+                    """() => {
+                        const byTag = [...document.querySelectorAll('ytcp-button')].find(
+                            b => b.innerText && b.innerText.trim().startsWith('Schedule')
+                        );
+                        if (byTag) return byTag.getAttribute('disabled') === null;
+                        const btn = document.querySelector('button[aria-label*=\"Schedule\"]');
+                        return btn ? !btn.disabled : false;
+                    }""",
+                    timeout=300000
+                )
+
+                sched_btn.click()
+                print(f"Scheduled for: {schedule_dt}")
+                time.sleep(3)
+                return True
+            except Exception as e:
+                print(f"Scheduling failed: {e} — falling back to Public")
+
         try:
-            self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            time.sleep(0.5)
             public_radio = self.page.locator(
                 "tp-yt-paper-radio-button[name='PUBLIC'], "
                 "ytcp-radio-button[value='PUBLIC'], "
@@ -246,8 +300,8 @@ class YouTubeShortsUploader:
             print("Video may be saved as draft. Check YouTube Studio.")
             return False
 
-    def _publish(self):
-        return self._go_through_wizard()
+    def _publish(self, schedule_dt=None):
+        return self._go_through_wizard(schedule_dt)
 
     def upload_video(self, video_path, title=None, description=None,
                      tags=None, visibility="public", auto_publish=True):
@@ -255,12 +309,14 @@ class YouTubeShortsUploader:
 
         Args:
             video_path: Path to video file
-            title: Video title (default: cleaned-up filename)
-            description: Video description (default: title)
-            tags: List of tags (default: ['#Shorts', '#gaming'])
+            title: Video title (default: cleaned-up filename or sidecar)
+            description: Video description (default: title or sidecar)
+            tags: List of tags (default: ['#Shorts', '#gaming'] or sidecar)
             visibility: 'public', 'unlisted', or 'private'
             auto_publish: If True, fills form automatically and publishes
         """
+        init_db()
+
         if not os.path.exists(video_path):
             print(f"File not found: {video_path}")
             return False
@@ -268,12 +324,21 @@ class YouTubeShortsUploader:
         name = os.path.basename(video_path)
         name_no_ext = os.path.splitext(name)[0]
 
+        if already_uploaded(name):
+            print(f"Skipping (already uploaded): {name}")
+            return True
+
+        sidecar = load_sidecar(video_path)
+
         if title is None:
-            title = re.sub(r'\s+', ' ', name_no_ext.replace("_", " ").replace("-", " ").strip())
+            title = sidecar.get("title") or re.sub(r'\s+', ' ', name_no_ext.replace("_", " ").replace("-", " ").strip())
         if description is None:
-            description = title
+            description = sidecar.get("description") or title
         if tags is None:
-            tags = ["#Shorts", "#gaming"]
+            tags = sidecar.get("tags") or ["#Shorts", "#gaming"]
+
+        schedule_str = sidecar.get("schedule")
+        schedule_dt = datetime.fromisoformat(schedule_str) if schedule_str else None
 
         print(f"\nUploading: {name}")
 
@@ -298,7 +363,9 @@ class YouTubeShortsUploader:
         if auto_publish:
             self._fill_form(title, description, tags)
             print("Publishing...")
-            self._publish()
+            success = self._publish(schedule_dt)
+            if success:
+                log_upload(name, title)
             print(f"Done: {title}")
             time.sleep(3)
         else:
@@ -332,6 +399,17 @@ class YouTubeShortsUploader:
             self._playwright = None
 
 
+def load_sidecar(video_path: str) -> dict:
+    """Load video.json sidecar next to the video file, if it exists."""
+    sidecar = os.path.splitext(video_path)[0] + ".json"
+    if os.path.exists(sidecar):
+        with open(sidecar) as f:
+            data = json.load(f)
+        print(f"Loaded sidecar: {os.path.basename(sidecar)}")
+        return data
+    return {}
+
+
 def upload_single(video_path, title=None, description=None,
                   tags=None, visibility="public", auto_publish=True):
     """Upload a single video."""
@@ -342,8 +420,13 @@ def upload_single(video_path, title=None, description=None,
         uploader.close()
 
 
+MAX_RETRIES = 3
+
+
 def upload_batch(folder_path, visibility="public", auto_publish=True):
     """Upload all videos in a folder using a single browser session."""
+    init_db()
+
     if not os.path.isdir(folder_path):
         print(f"Not a directory: {folder_path}")
         return
@@ -358,12 +441,23 @@ def upload_batch(folder_path, visibility="public", auto_publish=True):
     uploader = YouTubeShortsUploader()
     try:
         for i, fname in enumerate(videos, 1):
-            print(f"\n--- [{i}/{len(videos)}] {fname} ---")
-            uploader.upload_video(
-                os.path.join(folder_path, fname),
-                visibility=visibility,
-                auto_publish=auto_publish,
-            )
+            if already_uploaded(fname):
+                print(f"\n--- [{i}/{len(videos)}] Skipping (already uploaded): {fname} ---")
+                continue
+
+            for attempt in range(1, MAX_RETRIES + 1):
+                print(f"\n--- [{i}/{len(videos)}] {fname} (attempt {attempt}/{MAX_RETRIES}) ---")
+                success = uploader.upload_video(
+                    os.path.join(folder_path, fname),
+                    visibility=visibility,
+                    auto_publish=auto_publish,
+                )
+                if success:
+                    break
+                wait = 2 ** attempt
+                print(f"Retrying in {wait}s...")
+                time.sleep(wait)
+
             if i < len(videos):
                 print("Waiting 5 seconds before next upload...")
                 time.sleep(5)
