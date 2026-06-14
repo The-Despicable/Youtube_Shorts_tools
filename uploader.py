@@ -1,4 +1,5 @@
 """YouTube Shorts upload using Playwright with persistent browser profile."""
+
 import os
 import time
 import re
@@ -35,174 +36,230 @@ class YouTubeShortsUploader:
         return False
 
     def _click_create(self):
-        try:
-            self.page.wait_for_selector("button[aria-label*='Create']", timeout=15000)
-            self.page.click("button[aria-label*='Create']")
-            print("Clicked Create")
-            return True
-        except Exception as e:
-            print(f"Could not click Create: {e}")
-            return False
+        """Click the Create button in YouTube Studio."""
+        create_selectors = [
+            "ytcp-button#create-icon",
+            "#create-icon",
+            "button[aria-label*='Create']",
+            "ytcp-button[aria-label*='Create']",
+        ]
+        for sel in create_selectors:
+            try:
+                el = self.page.locator(sel).first
+                el.wait_for(state="visible", timeout=10000)
+                el.click()
+                print(f"Clicked Create via: {sel}")
+                return True
+            except Exception:
+                continue
+        print("Could not click Create button.")
+        return False
 
     def _select_upload_option(self):
-        try:
-            self.page.wait_for_selector("tp-yt-paper-item", timeout=5000)
-            self.page.locator("tp-yt-paper-item:has-text('Upload videos')").click()
-            print("Selected 'Upload videos'")
-            return True
-        except:
+        """Select 'Upload videos' from the Create dropdown."""
+        upload_selectors = [
+            "tp-yt-paper-item:has-text('Upload videos')",
+            "ytcp-paper-item:has-text('Upload videos')",
+            "text=Upload videos",
+        ]
+        for sel in upload_selectors:
             try:
-                self.page.locator("text=Upload videos").first.click()
-                print("Selected 'Upload videos' (text fallback)")
+                el = self.page.locator(sel).first
+                el.wait_for(state="visible", timeout=5000)
+                el.click()
+                print(f"Selected 'Upload videos' via: {sel}")
                 return True
-            except Exception as e:
-                print(f"Could not select upload: {e}")
-                return False
+            except Exception:
+                continue
+        print("Could not select 'Upload videos'.")
+        return False
 
     def _upload_file(self, video_path):
+        """Set the file input to the video path."""
         try:
             self.page.wait_for_selector("input[type='file']", state="attached", timeout=15000)
-            self.page.set_input_files("input[type='file']", video_path, timeout=10000)
+            self.page.set_input_files("input[type='file']", video_path)
             print(f"Upload started: {os.path.basename(video_path)}")
             return True
         except Exception as e:
             print(f"Upload error: {e}")
-            try:
-                handle = self.page.query_selector("input[type='file']")
-                if handle:
-                    handle.set_input_files(video_path)
-                    print(f"Upload started (alt method): {os.path.basename(video_path)}")
-                    return True
-            except:
-                pass
             return False
 
-    def _fill_form(self, title, description, tags):
-        """Fill all form fields with better selector fallbacks."""
-        print("Filling video details...")
+    def _wait_for_form(self):
+        """Wait for the upload dialog/form to appear after file selection."""
+        dialog_selectors = [
+            "ytcp-uploads-dialog",
+            "ytcp-video-metadata-editor",
+            "#textbox[contenteditable='true']",
+        ]
+        for sel in dialog_selectors:
+            try:
+                self.page.wait_for_selector(sel, timeout=20000)
+                print(f"Upload form ready (matched: {sel})")
+                return True
+            except Exception:
+                continue
+        print("Warning: Upload form may not have fully loaded.")
+        return False
 
-        # Wait for the upload form to fully load
-        time.sleep(5)
-
-        # Title - try multiple selectors
+    def _fill_title(self, title):
+        """Fill the video title field (contenteditable div, not textarea)."""
         title_selectors = [
-            "#title-textarea",
-            "[aria-label*='title' i]",
-            "[placeholder*='title' i]",
-            "ytcp-video-title textarea",
-            "textarea#textbox",
+            "ytcp-video-metadata-editor #title-textarea #textbox",
+            "#title-textarea #textbox",
+            "ytcp-video-metadata-editor div[contenteditable='true']",
+            "[aria-label*='title' i][contenteditable='true']",
         ]
         for sel in title_selectors:
             try:
-                el = self.page.locator(sel)
-                if el.is_visible(timeout=2000):
-                    el.fill(title)
-                    print(f"Title set via: {sel}")
-                    break
-            except:
+                el = self.page.locator(sel).first
+                el.wait_for(state="visible", timeout=5000)
+                el.triple_click()
+                el.fill(title)
+                print(f"Title set via: {sel}")
+                return True
+            except Exception:
                 continue
+        print("Warning: Could not set title.")
+        return False
 
-        # Description - try multiple selectors
+    def _fill_description(self, description):
+        """Fill the video description field."""
         desc_selectors = [
-            "#description-textarea",
-            "[aria-label*='description' i]",
-            "[placeholder*='description' i]",
-            "textarea#description",
+            "ytcp-video-metadata-editor #description-textarea #textbox",
+            "#description-textarea #textbox",
+            "[aria-label*='description' i][contenteditable='true']",
         ]
         for sel in desc_selectors:
             try:
-                el = self.page.locator(sel)
-                if el.is_visible(timeout=2000):
-                    el.fill(description)
-                    print(f"Description set via: {sel}")
-                    break
-            except:
+                el = self.page.locator(sel).first
+                el.wait_for(state="visible", timeout=5000)
+                el.triple_click()
+                el.fill(description)
+                print(f"Description set via: {sel}")
+                return True
+            except Exception:
                 continue
+        print("Warning: Could not set description.")
+        return False
 
-        # Tags - try to find tag input
+    def _fill_tags(self, tags):
+        """Add hashtag tags to the video (optional)."""
+        if not tags:
+            return
         tag_selectors = [
+            "ytcp-free-text-chip-bar input",
             "#tags-input input",
             "[aria-label*='tag' i] input",
-            "ytcp-form-input-container input",
         ]
         for sel in tag_selectors:
             try:
-                el = self.page.locator(sel)
-                if el.is_visible(timeout=2000):
-                    for tag in tags:
-                        el.fill(tag)
-                        el.press("Enter")
-                        time.sleep(0.3)
-                    print(f"Tags added via: {sel}")
-                    break
-            except:
+                el = self.page.locator(sel).first
+                el.wait_for(state="visible", timeout=5000)
+                for tag in tags:
+                    el.fill(tag)
+                    el.press("Enter")
+                    time.sleep(0.3)
+                print(f"Tags added via: {sel}")
+                return
+            except Exception:
                 continue
+        print("Note: Could not add tags — include hashtags in description as fallback.")
 
-    def _set_public(self):
-        """Set visibility to Public by scrolling and clicking radio."""
-        print("Setting visibility to Public...")
-        try:
-            self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            time.sleep(2)
-
-            # Click the Public radio
-            self.page.locator("tp-yt-paper-radio-button:has-text('Public')").click()
-            print("Set to Public")
-            return True
-        except Exception as e:
-            print(f"Could not set Public: {e}")
-            return False
+    def _fill_form(self, title, description, tags):
+        """Wait for the form then fill all fields."""
+        self._wait_for_form()
+        print("Filling video details...")
+        self._fill_title(title)
+        self._fill_description(description)
+        self._fill_tags(tags)
 
     def _go_through_wizard(self):
-        """Click Next buttons until we reach Visibility step, set Public, then Publish."""
-        print("Going through upload wizard...")
-        for step in range(3):
+        """Navigate the upload wizard steps, then set Public and Publish."""
+        print("Navigating upload wizard...")
+
+        for step in range(4):
             try:
-                next_btn = self.page.locator("button:has-text('Next')")
-                if next_btn.is_visible(timeout=5000):
-                    next_btn.click()
-                    print(f"Clicked Next (step {step + 1})")
-                    time.sleep(2)
-            except:
-                print("No more Next buttons")
+                if self.page.locator(
+                    "ytcp-button:has-text('Publish'), button:has-text('Publish')"
+                ).is_visible():
+                    print("Reached Publish step.")
+                    break
+
+                next_btn = self.page.locator(
+                    "ytcp-button:has-text('Next'), button:has-text('Next')"
+                ).first
+                next_btn.wait_for(state="visible", timeout=8000)
+                next_btn.click()
+                print(f"Clicked Next (step {step + 1})")
+                time.sleep(1)
+                self.page.wait_for_function(
+                    "() => !document.querySelector('ytcp-button[disabled]:has-text(\"Next\")')",
+                    timeout=10000
+                )
+            except Exception:
+                print(f"No Next at step {step + 1}, moving on.")
                 break
 
-        # Now try to set visibility to Public
-        time.sleep(2)
+        time.sleep(1)
         try:
             self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            time.sleep(1)
-            self.page.locator("tp-yt-paper-radio-button").filter(has_text="Public").click(timeout=5000)
+            time.sleep(0.5)
+            public_radio = self.page.locator(
+                "tp-yt-paper-radio-button[name='PUBLIC'], "
+                "ytcp-radio-button[value='PUBLIC'], "
+                "tp-yt-paper-radio-button"
+            ).filter(has_text="Public").first
+            public_radio.wait_for(state="visible", timeout=8000)
+            public_radio.click()
             print("Set to Public")
             time.sleep(1)
-        except:
-            print("Could not set Public visibility")
+        except Exception as e:
+            print(f"Could not set Public visibility: {e}")
 
-        # Click Publish
         try:
-            pub = self.page.locator("button:has-text('Publish')")
-            pub.wait_for(timeout=15000)
-            pub.click()
+            pub_btn = self.page.locator(
+                "ytcp-button:has-text('Publish'), button:has-text('Publish')"
+            ).first
+            pub_btn.wait_for(state="visible", timeout=20000)
+
+            print("Waiting for upload to finish (Publish button to become enabled)...")
+            self.page.wait_for_function(
+                """() => {
+                    const byTag = [...document.querySelectorAll('ytcp-button')].find(
+                        b => b.innerText && b.innerText.trim().startsWith('Publish')
+                    );
+                    if (byTag) return byTag.getAttribute('disabled') === null;
+                    const btn = document.querySelector('button[aria-label*=\"Publish\"]');
+                    return btn ? !btn.disabled : false;
+                }""",
+                timeout=300000
+            )
+
+            pub_btn.click()
             print("Clicked Publish!")
             time.sleep(3)
             return True
-        except:
-            print("Publish button not found. Video saved as draft.")
+
+        except Exception as e:
+            print(f"Publish failed: {e}")
+            print("Video may be saved as draft. Check YouTube Studio.")
             return False
 
     def _publish(self):
         return self._go_through_wizard()
 
-    def upload_video(self, video_path, title=None, description=None, tags=None, visibility="public", auto_publish=True):
+    def upload_video(self, video_path, title=None, description=None,
+                     tags=None, visibility="public", auto_publish=True):
         """Upload a single video.
 
         Args:
             video_path: Path to video file
-            title: Video title (default: filename without extension)
-            description: Video description (default: title + hashtags)
-            tags: List of tags (default: [#Shorts])
-            visibility: public, unlisted, or private
-            auto_publish: If True, auto-fill title/desc and publish
+            title: Video title (default: cleaned-up filename)
+            description: Video description (default: title)
+            tags: List of tags (default: ['#Shorts', '#gaming'])
+            visibility: 'public', 'unlisted', or 'private'
+            auto_publish: If True, fills form automatically and publishes
         """
         if not os.path.exists(video_path):
             print(f"File not found: {video_path}")
@@ -212,13 +269,9 @@ class YouTubeShortsUploader:
         name_no_ext = os.path.splitext(name)[0]
 
         if title is None:
-            # Clean up the filename for use as title
-            title = name_no_ext.replace("_", " ").replace("-", " ").strip()
-            title = re.sub(r'\s+', ' ', title)
-
+            title = re.sub(r'\s+', ' ', name_no_ext.replace("_", " ").replace("-", " ").strip())
         if description is None:
             description = title
-
         if tags is None:
             tags = ["#Shorts", "#gaming"]
 
@@ -231,26 +284,23 @@ class YouTubeShortsUploader:
 
         if not self._click_create():
             return False
+
         time.sleep(1)
 
         if not self._select_upload_option():
             return False
+
         time.sleep(2)
 
         if not self._upload_file(video_path):
             return False
 
         if auto_publish:
-            print("Waiting for upload to process...")
-            time.sleep(5)
-
             self._fill_form(title, description, tags)
-
             print("Publishing...")
             self._publish()
-
-            print(f"Published: {title}")
-            time.sleep(5)
+            print(f"Done: {title}")
+            time.sleep(3)
         else:
             self._wait_for_publish_button()
             print("\nBrowser is open for you to fill details.")
@@ -262,13 +312,15 @@ class YouTubeShortsUploader:
 
     def _wait_for_publish_button(self):
         print("Waiting for video processing...")
-        time.sleep(5)
         try:
-            self.page.wait_for_selector("button:has-text('Publish')", timeout=60000)
+            self.page.wait_for_selector(
+                "ytcp-button:has-text('Publish'), button:has-text('Publish')",
+                timeout=60000
+            )
             print("Publish button available")
             return True
-        except:
-            print("Publish button not found")
+        except Exception:
+            print("Publish button not found within timeout.")
             return False
 
     def close(self):
@@ -280,7 +332,8 @@ class YouTubeShortsUploader:
             self._playwright = None
 
 
-def upload_single(video_path, title=None, description=None, tags=None, visibility="public", auto_publish=True):
+def upload_single(video_path, title=None, description=None,
+                  tags=None, visibility="public", auto_publish=True):
     """Upload a single video."""
     uploader = YouTubeShortsUploader()
     try:
@@ -290,7 +343,7 @@ def upload_single(video_path, title=None, description=None, tags=None, visibilit
 
 
 def upload_batch(folder_path, visibility="public", auto_publish=True):
-    """Upload all videos in a folder."""
+    """Upload all videos in a folder using a single browser session."""
     if not os.path.isdir(folder_path):
         print(f"Not a directory: {folder_path}")
         return
@@ -302,13 +355,20 @@ def upload_batch(folder_path, visibility="public", auto_publish=True):
 
     print(f"Found {len(videos)} video(s)")
 
-    for i, fname in enumerate(videos, 1):
-        print(f"\n--- [{i}/{len(videos)}] {fname} ---")
-        upload_single(os.path.join(folder_path, fname), visibility=visibility, auto_publish=auto_publish)
-
-        if i < len(videos):
-            print("Waiting 5 seconds...")
-            time.sleep(5)
+    uploader = YouTubeShortsUploader()
+    try:
+        for i, fname in enumerate(videos, 1):
+            print(f"\n--- [{i}/{len(videos)}] {fname} ---")
+            uploader.upload_video(
+                os.path.join(folder_path, fname),
+                visibility=visibility,
+                auto_publish=auto_publish,
+            )
+            if i < len(videos):
+                print("Waiting 5 seconds before next upload...")
+                time.sleep(5)
+    finally:
+        uploader.close()
 
     print("\nBatch upload complete!")
 
