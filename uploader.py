@@ -304,7 +304,8 @@ class YouTubeShortsUploader:
         return self._go_through_wizard(schedule_dt)
 
     def upload_video(self, video_path, title=None, description=None,
-                     tags=None, visibility="public", auto_publish=True):
+                     tags=None, visibility="public", auto_publish=True,
+                     schedule_dt=None):
         """Upload a single video.
 
         Args:
@@ -314,6 +315,7 @@ class YouTubeShortsUploader:
             tags: List of tags (default: ['#Shorts', '#gaming'] or sidecar)
             visibility: 'public', 'unlisted', or 'private'
             auto_publish: If True, fills form automatically and publishes
+            schedule_dt: Override schedule datetime (takes priority over sidecar)
         """
         init_db()
 
@@ -338,7 +340,8 @@ class YouTubeShortsUploader:
             tags = sidecar.get("tags") or ["#Shorts", "#gaming"]
 
         schedule_str = sidecar.get("schedule")
-        schedule_dt = datetime.fromisoformat(schedule_str) if schedule_str else None
+        if schedule_dt is None:
+            schedule_dt = datetime.fromisoformat(schedule_str) if schedule_str else None
 
         print(f"\nUploading: {name}")
 
@@ -411,11 +414,15 @@ def load_sidecar(video_path: str) -> dict:
 
 
 def upload_single(video_path, title=None, description=None,
-                  tags=None, visibility="public", auto_publish=True):
+                  tags=None, visibility="public", auto_publish=True,
+                  schedule_dt=None):
     """Upload a single video."""
     uploader = YouTubeShortsUploader()
     try:
-        return uploader.upload_video(video_path, title, description, tags, visibility, auto_publish)
+        return uploader.upload_video(
+            video_path, title, description, tags, visibility, auto_publish,
+            schedule_dt=schedule_dt,
+        )
     finally:
         uploader.close()
 

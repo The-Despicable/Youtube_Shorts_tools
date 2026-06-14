@@ -34,3 +34,11 @@ def log_upload(filename: str, title: str, video_id: str = None):
     )
     conn.commit()
     conn.close()
+
+def list_uploads():
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT filename, title, uploaded_at FROM uploads ORDER BY uploaded_at DESC"
+    ).fetchall()
+    conn.close()
+    return rows
